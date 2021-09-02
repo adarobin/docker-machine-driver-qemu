@@ -36,6 +36,7 @@ type Driver struct {
 	EnginePort int
 	FirstQuery bool
 
+	Accelerator      string
 	Memory           int
 	DiskSize         int
 	CPU              int
@@ -55,17 +56,17 @@ type Driver struct {
 	DiskPath         string
 	CacheMode        string
 	IOMode           string
-	connectionString string
-	//	conn             *libvirt.Connect
-	//	VM               *libvirt.Domain
-	vmLoaded        bool
-	UserDataFile    string
-	CloudConfigRoot string
-	LocalPorts      string
+	UserDataFile     string
+	CloudConfigRoot  string
+	LocalPorts       string
 }
 
 func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 	return []mcnflag.Flag{
+		mcnflag.StringFlag{
+			Name:  "qemu-accelerator",
+			Usage: "Accelerator to use",
+		},
 		mcnflag.IntFlag{
 			Name:  "qemu-memory",
 			Usage: "Size of memory for host in MB",
@@ -198,6 +199,7 @@ func (d *Driver) DriverName() string {
 
 func (d *Driver) SetConfigFromFlags(flags drivers.DriverOptions) error {
 	log.Debugf("SetConfigFromFlags called")
+	d.Accelerator = flags.String("qemu-accelerator")
 	d.Memory = flags.Int("qemu-memory")
 	d.DiskSize = flags.Int("qemu-disk-size")
 	d.CPU = flags.Int("qemu-cpu-count")
@@ -381,19 +383,19 @@ func parsePortRange(rawPortRange string) (int, int, error) {
 
 	minPort, err := strconv.Atoi(portRange[0])
 	if err != nil {
-		return 0, 0, fmt.Errorf("Invalid port range")
+		return 0, 0, fmt.Errorf("invalid port range")
 	}
 	maxPort, err := strconv.Atoi(portRange[1])
 	if err != nil {
-		return 0, 0, fmt.Errorf("Invalid port range")
+		return 0, 0, fmt.Errorf("invalid port range")
 	}
 
 	if maxPort < minPort {
-		return 0, 0, fmt.Errorf("Invalid port range")
+		return 0, 0, fmt.Errorf("invalid port range")
 	}
 
 	if maxPort-minPort < 2 {
-		return 0, 0, fmt.Errorf("Port range must be minimum 2 ports")
+		return 0, 0, fmt.Errorf("port range must be minimum 2 ports")
 	}
 
 	return minPort, maxPort, nil
@@ -444,13 +446,17 @@ func (d *Driver) Start() error {
 
 	var startCmd []string
 
+	if d.Accelerator != "" {
+		startCmd = append(startCmd,
+			"-accel", d.Accelerator,
+		)
+	}
+
 	if d.Display {
 		if d.DisplayType != "" {
 			startCmd = append(startCmd,
 				"-display", d.DisplayType,
 			)
-		} else {
-			// Use the default graphic output
 		}
 	} else {
 		if d.Nographic {
@@ -483,18 +489,18 @@ func (d *Driver) Start() error {
 
 	if d.Network == "user" {
 		startCmd = append(startCmd,
-			"-net", "nic,vlan=0,model=virtio",
-			"-net", fmt.Sprintf("user,vlan=0,hostfwd=tcp::%d-:22,hostfwd=tcp::%d-:2376,hostname=%s", d.SSHPort, d.EnginePort, d.GetMachineName()),
+			"-net", "nic,model=virtio",
+			"-net", fmt.Sprintf("user,hostfwd=tcp::%d-:22,hostfwd=tcp::%d-:2376,hostname=%s", d.SSHPort, d.EnginePort, d.GetMachineName()),
 		)
 	} else if d.Network == "tap" {
 		startCmd = append(startCmd,
-			"-net", "nic,vlan=0,model=virtio",
-			"-net", fmt.Sprintf("tap,vlan=0,ifname=%s,script=no,downscript=no", d.NetworkInterface),
+			"-net", "nic,model=virtio",
+			"-net", fmt.Sprintf("tap,ifname=%s,script=no,downscript=no", d.NetworkInterface),
 		)
 	} else if d.Network == "bridge" {
 		startCmd = append(startCmd,
-			"-net", "nic,vlan=0,model=virtio",
-			"-net", fmt.Sprintf("bridge,vlan=0,br=%s", d.NetworkBridge),
+			"-net", "nic,model=virtio",
+			"-net", fmt.Sprintf("bridge,br=%s", d.NetworkBridge),
 		)
 	} else {
 		log.Errorf("Unknown network: %s", d.Network)
@@ -559,12 +565,6 @@ func cmdOutErr(cmdStr string, args ...string) (string, string, error) {
 		}
 	}
 	return stdout.String(), stderrStr, err
-}
-
-func cmdStart(cmdStr string, args ...string) error {
-	cmd := exec.Command(cmdStr, args...)
-	log.Debugf("executing: %v %v", cmdStr, strings.Join(args, " "))
-	return cmd.Start()
 }
 
 func (d *Driver) Stop() error {
