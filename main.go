@@ -1,8 +1,8 @@
 package main
 
 import (
+	"github.com/adarobin/docker-machine-driver-qemu/qemu"
 	"github.com/docker/machine/libmachine/drivers/plugin"
-	"github.com/machine-drivers/docker-machine-driver-qemu/qemu"
 )
 
 func main() {
